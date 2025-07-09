@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css"/>
+    <script src="http://code.jquery.com/jquery-latest.min.js"></script>
+</head>
+<body>
+<div id="terminal" style="width: 100%; height: 90vh;"></div>
+<script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+<script>
+    let socket =null;
+    let term = new Terminal();
+    term.open(document.getElementById('terminal'));
+    let inputHandlerBound = false;
+
+    function init() {
+        $.ajax({
+            url: 'http://localhost:8080/getNamespaces',
+            method: 'GET',
+            success: function(response) {
+                var option = "<option value=novalue>" + "namespaces" +"</option>";
+                $('#namespace').append(option);
+                for (var i = 0; i < response.length; i++){
+                    var option = "<option value=" + response[i].metadata.name + ">"+ response[i].metadata.name +"</option>";
+                    $('#namespace').append(option);
+                }
+            },
+            error: function(xhr, status, error) {
+            }
+        });
+    }
+    init();
+    $(document).on('change', "#namespace" ,function (){
+        if ($('#namespace').val() != "novalue"){
+            $.ajax({
+                url: 'http://localhost:8080/getPods?namespace='+$('#namespace').val(),
+                method: 'GET',
+                success: function(response) {
+                    var option = "<option value=novalue>" + "pods" +"</option>";
+                    $('#pod').empty().append(option);
+                    for (var i = 0; i < response.length; i++){
+                        var option = "<option value=" + response[i].metadata.name + ">"+ response[i].metadata.name +"</option>";
+                        $('#pod').append(option);
+                    }
+                },
+                error: function(xhr, status, error) {
+                }
+            });
+        }
+    });
+    $(document).on('change', "#pod" ,function (){
+        if ($('#namespace').val() != "novalue" && $('#pod').val() != "novalue") {
+            $.ajax({
+                url: 'http://localhost:8080/getContainers?namespace=' + $('#namespace').val() + '&pod=' + $('#pod').val(),
+                method: 'GET',
+                success: function (response) {
+                    var option = "<option value=novalue>" + "containers" + "</option>";
+                    $('#container').empty().append(option);
+                    for (var i = 0; i < response.length; i++) {
+                        var option = "<option value=" + response[i].name + ">" + response[i].name + "</option>";
+                        $('#container').append(option);
+                    }
+                },
+                error: function (xhr, status, error) {
+                }
+            });
+        }
+    });
+    $(document).on('change', "#container" ,function (){
+        if (socket && socket.readyState === WebSocket.OPEN){
+            socket.close()
+        }
+        if ($('#namespace').val() != "novalue" && $('#pod').val() != "novalue" && $('#container').val() != "novalue") {
+            socket = new WebSocket('ws://localhost:8080/ws/exec?namespace='+$('#namespace').val()+'&pod='+$('#pod').val()+'&container='+$('#container').val());
+            if (!inputHandlerBound) {
+                term.onData(data =>{
+                    socket.send(data);
+                })
+                inputHandlerBound = true;
+            }
+            socket.onmessage = event => {
+                term.write(event.data);
+            };
+            socket.onopen = () => term.write('connected....\n\r')
+            socket.onclose = () => term.write('disconnected....\n')
+        }
+    });
+</script>
+<form>
+    <select name="namespace" id="namespace">
+
+    </select>
+    <select name="pod" id="pod">
+
+    </select>
+    <select name="container" id="container">
+
+    </select>
+    <br><br>
+</form>
+</body>
+</html>

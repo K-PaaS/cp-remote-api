@@ -1,0 +1,105 @@
+package router
+
+import (
+	"errors"
+	"fmt"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+)
+
+var JwtSecret = "dfa4ad2646d6b4864f2dfa5428249d4eb54dc29bf3f29658fd4676d25706f83c9fc4ef626fa60d2c589a79ebec448ba4d591e2fcb04926fab783fcae50e97c06"
+
+func CORSMiddleware() gin.HandlerFunc {
+	return cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},
+		AllowHeaders:     []string{"*"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: false,
+	})
+}
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		//authHeader := c.GetHeader("Authorization")
+		authHeader := c.GetHeader("Sec-WebSocket-Protocol")
+		//if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		//	c.AbortWithStatusJSON(http.StatusUnauthorized, "MISSING_OR_MALFORMED_JWT")
+		//	return
+		//}
+		parts := strings.Split(authHeader, ",")
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "bearer" {
+			c.String(http.StatusUnauthorized, "Missing or invalid Sec-WebSocket-Protocol header")
+			return
+		}
+
+		//tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		tokenString := strings.TrimSpace(parts[1])
+
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
+				return nil, jwt.ErrTokenSignatureInvalid
+			}
+			return []byte(JwtSecret), nil
+		})
+
+		if err != nil || !token.Valid {
+			slog.Error("Invalid JWT", "err", err.Error())
+			if errors.Is(err, jwt.ErrTokenExpired) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, "TOKEN_EXPIRED")
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, "TOKEN_FAILED")
+			return
+		}
+
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			slog.Error("Invalid claims")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, "TOKEN_FAILED")
+			return
+		}
+
+		if expRaw, ok := claims["exp"].(float64); ok {
+			exp := int64(expRaw)
+			if exp < time.Now().Unix() {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, "TOKEN_EXPIRED")
+				return
+			}
+		} else {
+			slog.Error("Missing exp claim")
+			c.AbortWithStatusJSON(http.StatusUnauthorized, "TOKEN_FAILED")
+			return
+		}
+
+		userId, ok := claims["userAuthId"].(string)
+		if !ok {
+			slog.Error("Missing userId claim") // ApiAccessDenied
+			c.AbortWithStatusJSON(http.StatusUnauthorized, "ApiAccessDenied")
+			return
+		}
+		fmt.Print(userId)
+		/*
+			isAdmin, err := i.IsAdminCheck(userId)
+			if err != nil {
+				slog.Info("Failed to admin check api call", "err", err)
+				response.ServerError(c)
+				return
+			}
+
+			if !isAdmin {
+				slog.Info("Not authorized to access this api")
+				response.Unauthorized(c, errmsg.ApiAccessDenied)
+				return
+			}*/
+
+		c.Set("claims", claims)
+		c.Next()
+	}
+}
