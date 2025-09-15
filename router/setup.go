@@ -2,6 +2,7 @@ package router
 
 import (
 	"cp-remote-access-api/controller"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,9 +17,12 @@ func Init() {
 		c.String(200, "readyz")
 	})
 
-	r.Use(AuthMiddleware())
-
-	r.GET("/ws/exec", controller.ExecWebSocketHandler)
+	api := r.Group("/")
+	api.Use(AuthMiddleware())
+	{
+		api.GET("/ws/exec", controller.ExecWebSocketHandler)
+		api.GET("/shell/check", controller.CheckShellHandler)
+	}
 
 	r.Run(":8080")
 }

@@ -3,13 +3,14 @@ package router
 import (
 	"errors"
 	"fmt"
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 var JwtSecret = "dfa4ad2646d6b4864f2dfa5428249d4eb54dc29bf3f29658fd4676d25706f83c9fc4ef626fa60d2c589a79ebec448ba4d591e2fcb04926fab783fcae50e97c06"
@@ -27,20 +28,23 @@ func CORSMiddleware() gin.HandlerFunc {
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		//authHeader := c.GetHeader("Authorization")
-		authHeader := c.GetHeader("Sec-WebSocket-Protocol")
-		//if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-		//	c.AbortWithStatusJSON(http.StatusUnauthorized, "MISSING_OR_MALFORMED_JWT")
-		//	return
-		//}
-		parts := strings.Split(authHeader, ",")
-		if len(parts) != 2 || strings.TrimSpace(parts[0]) != "bearer" {
-			c.String(http.StatusUnauthorized, "Missing or invalid Sec-WebSocket-Protocol header")
-			return
+		var tokenString string
+
+		authHeader := c.GetHeader("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		} else {
+			wsHeader := c.GetHeader("Sec-WebSocket-Protocol")
+			parts := strings.Split(wsHeader, ",")
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "bearer" {
+				tokenString = strings.TrimSpace(parts[1])
+			}
 		}
 
-		//tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-		tokenString := strings.TrimSpace(parts[1])
+		if tokenString == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, "MISSING_JWT")
+			return
+		}
 
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 			if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
