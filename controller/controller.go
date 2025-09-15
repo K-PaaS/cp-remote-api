@@ -1,17 +1,22 @@
 package controller
 
 import (
+	"bytes"
+	"context"
 	"cp-remote-access-api/internal/vault"
 	"cp-remote-access-api/model"
+	"log"
+	"net/http"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"log"
 )
 
 func GetClusterInfo(clusterID string, userAuthId string, userType string) (model.ClusterCredential, error) {
@@ -108,4 +113,94 @@ func ExecWebSocketHandler(c *gin.Context) {
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Exec stream error: "+err.Error()))
 	}
+}
+
+type ContainerShellStatus struct {
+	Name     string `json:"name"`
+	HasShell bool   `json:"hasShell"`
+}
+
+func CheckShellHandler(c *gin.Context) {
+	var namespace = c.Query("namespace")
+	var podName = c.Query("pod")
+	var clusterId = c.Query("clusterId")
+
+	val, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Claims not found in context"})
+		return
+	}
+	claims, exists := val.(jwt.MapClaims)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid claims format"})
+		return
+	}
+
+	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get cluster info: " + err.Error()})
+		return
+	}
+	cfg := &rest.Config{
+		Host:        clusterInfo.APIServerURL,
+		BearerToken: clusterInfo.BearerToken,
+		TLSClientConfig: rest.TLSClientConfig{
+			Insecure: true,
+		},
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create clientset: " + err.Error()})
+		return
+	}
+
+	podInfo, err := clientset.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Pod not found: " + err.Error()})
+		return
+	}
+
+	var statuses []ContainerShellStatus
+	command := []string{"/bin/sh", "-c", "type /bin/sh"}
+
+	for _, container := range podInfo.Spec.Containers {
+
+		req := clientset.CoreV1().RESTClient().Post().
+			Resource("pods").
+			Name(podName).
+			Namespace(namespace).
+			SubResource("exec").
+			VersionedParams(&corev1.PodExecOptions{
+				Container: container.Name,
+				Command:   command,
+				Stdin:     false,
+				Stdout:    true,
+				Stderr:    true,
+				TTY:       false,
+			}, scheme.ParameterCodec)
+
+		var stdout, stderr bytes.Buffer
+		executor, err := remotecommand.NewSPDYExecutor(cfg, "POST", req.URL())
+		if err != nil {
+			statuses = append(statuses, ContainerShellStatus{
+				Name:     container.Name,
+				HasShell: false,
+			})
+			continue
+		}
+		err = executor.Stream(remotecommand.StreamOptions{
+			Stdout: &stdout,
+			Stderr: &stderr,
+		})
+
+		hasShellResult := (err == nil)
+
+		statuses = append(statuses, ContainerShellStatus{
+			Name:     container.Name,
+			HasShell: hasShellResult,
+		})
+	}
+
+	c.JSON(http.StatusOK, statuses)
 }
