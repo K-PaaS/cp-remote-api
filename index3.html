@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Terminal Test</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm/css/xterm.css"/>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f4f9;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        #status-message {
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            border-left: 5px solid;
+        }
+        .status-info {
+            background-color: #e7f3fe;
+            border-color: #2196F3;
+            color: #1a78c2;
+        }
+        .status-success {
+            background-color: #e8f5e9;
+            border-color: #4CAF50;
+            color: #2e7d32;
+        }
+        .status-error {
+            background-color: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+        #terminal-container {
+            width: 100%;
+            height: 75vh;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        #terminal {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<h1>터미널 연결 테스트</h1>
+<div id="status-message" class="status-info">페이지 로드 시 /bin/sh 존재 여부를 확인합니다...</div>
+<div id="terminal-container">
+    <div id="terminal"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm/lib/xterm.js"></script>
+<script>
+
+    const config = {
+        token: "eyJhbGciOiJIUzUxMiJ9.eyJzdWIiOiJhZG1pbiIsInVzZXJBdXRoSWQiOiIxOTcyNGMxMi03YjNkLTRlNDYtYWQzZC05ZDViYmFmMTQ2MDciLCJyb2xlc0luZm8iOnsiYmI1ZThhN2ItZWEzMy00ZTMwLWE5N2MtNjJhOTMxN2E4ZjQ0Ijp7InVzZXJUeXBlIjoiU1VQRVJfQURNSU4iLCJuYW1lc3BhY2VMaXN0IjpudWxsfSwiNDdjOTEwYjQtYWVlZC00MTVhLWFkMDktZThlZWE5M2ViYjI5Ijp7InVzZXJUeXBlIjoiU1VQRVJfQURNSU4iLCJuYW1lc3BhY2VMaXN0IjpudWxsfSwiNjE1NjZjNDctNWRmNi00Y2NiLTlmMzUtZDhjYjgxODZjYTVhIjp7InVzZXJUeXBlIjoiU1VQRVJfQURNSU4iLCJuYW1lc3BhY2VMaXN0IjpudWxsfSwiNjhmYWNjYjAtNzIzMS00M2U1LWFhMTgtODRjZjgxNTFiNjQzIjp7InVzZXJUeXBlIjoiU1VQRVJfQURNSU4iLCJuYW1lc3BhY2VMaXN0IjpudWxsfX0sIklQIjpudWxsLCJ1c2VyVHlwZSI6IlNVUEVSX0FETUlOIiwiZXhwIjoxNzU2OTU1MDY1LCJpYXQiOjE3NTY5NDQyNjUsIkJyb3dzZXIiOm51bGx9.-x_OXhDp8hCihxs59eIXOow-AntkOzVr3vl9Wkk4xVWSidAJ6jGr9aQIz0nitHiNyV_moUYb7cv-eQ70LDXteQ",
+        namespace: "postgre",
+        pod: "postgre-postgresql-0",
+        container: "postgre-postgresql",
+        clusterId: "47c910b4-aeed-415a-ad09-e8eea93ebb29",
+        remoteApiBaseUrl: "wss://portal.180.210.83.161.nip.io/remote-api"
+    };
+
+    const statusDiv = document.getElementById('status-message');
+    let term = null;
+
+    function initTerminal() {
+
+        if (term) return;
+
+        term = new Terminal();
+        term.open(document.getElementById('terminal'));
+
+        const wsUrl = `${config.remoteApiBaseUrl}/ws/exec?namespace=${config.namespace}&pod=${config.pod}&container=${config.container}&clusterId=${config.clusterId}`;
+        const socket = new WebSocket(wsUrl, ["bearer", config.token]);
+
+        term.onData(data => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(data);
+            }
+        });
+
+        socket.onopen = () => term.write('Connected to terminal...\n\r');
+        socket.onmessage = event => term.write(event.data);
+        socket.onclose = () => term.write('\n\rDisconnected.');
+        socket.onerror = (error) => console.error('WebSocket Error:', error);
+    }
+
+    async function checkShellAndConnect() {
+        const url = `http://localhost:8080/shell/check?namespace=${config.namespace}&pod=${config.pod}`;
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + config.token }
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'API request failed');
+            }
+
+            const targetContainerStatus = data.find(c => c.name === config.container);
+
+            if (targetContainerStatus && targetContainerStatus.hasShell) {
+                statusDiv.textContent = `✅ /bin/sh이(가) 존재합니다. 터미널에 연결합니다...`;
+                statusDiv.className = 'status-message status-success';
+                initTerminal();
+            } else {
+                statusDiv.textContent = `❌ /bin/sh이(가) 없어 터미널에 접속할 수 없습니다.`;
+                statusDiv.className = 'status-message status-error';
+                document.getElementById('terminal-container').style.display = 'none';
+            }
+
+        } catch (error) {
+            console.error("Error during shell check:", error);
+            statusDiv.textContent = `🚫 에러: API 서버에 연결할 수 없거나 응답이 잘못되었습니다.`;
+            statusDiv.className = 'status-message status-error';
+            document.getElementById('terminal-container').style.display = 'none';
+        }
+    }
+
+    window.onload = checkShellAndConnect;
+
+</script>
+</body>
+</html>

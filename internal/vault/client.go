@@ -2,6 +2,7 @@ package vault
 
 import (
 	"cp-remote-access-api/model"
+	"errors"
 	"fmt"
 	"os"
 
@@ -53,8 +54,11 @@ func (c *Client) GetClusterInfo(clusterID string) (model.ClusterCredential, erro
 
 	path := fmt.Sprintf("secret/data/cluster/%s", clusterID)
 	secret, err := c.api.Logical().Read(path)
-	if err != nil || secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+	if err != nil {
 		return model.ClusterCredential{}, err
+	}
+	if secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+		return model.ClusterCredential{}, errors.New("malformed secret data from vault: data block is missing")
 	}
 	data := secret.Data["data"].(map[string]interface{})
 	info = model.ClusterCredential{
@@ -68,12 +72,16 @@ func (c *Client) GetClusterInfo(clusterID string) (model.ClusterCredential, erro
 func (c *Client) GetClusterAPI(clusterID string) (string, error) {
 	path := fmt.Sprintf("secret/data/cluster/%s", clusterID)
 	secret, err := c.api.Logical().Read(path)
-	if err != nil || secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+	if err != nil {
 		return "", err
+	}
+	if secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+		return "", errors.New("malformed secret data from vault: data block is missing")
 	}
 	data := secret.Data["data"].(map[string]interface{})
 	return data["clusterApiUrl"].(string), nil
 }
+
 func (c *Client) GetClusterToken(clusterID string, userGuid string, userType string) (string, error) {
 	var path string
 	if userType == "SUPER_ADMIN" {
@@ -83,8 +91,11 @@ func (c *Client) GetClusterToken(clusterID string, userGuid string, userType str
 	}
 
 	secret, err := c.api.Logical().Read(path)
-	if err != nil || secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+	if err != nil {
 		return "", err
+	}
+	if secret == nil || secret.Data == nil || secret.Data["data"] == nil {
+		return "", errors.New("malformed secret data from vault: data block is missing")
 	}
 	data := secret.Data["data"].(map[string]interface{})
 	return data["clusterToken"].(string), nil
