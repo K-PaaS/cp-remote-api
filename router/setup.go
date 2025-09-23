@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func Init() {
+func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 
@@ -24,5 +24,10 @@ func Init() {
 		api.GET("/shell/check", controller.CheckShellHandler)
 	}
 
+	return r
+}
+
+func Init() {
+	r := SetupRouter()
 	r.Run(":8080")
 }

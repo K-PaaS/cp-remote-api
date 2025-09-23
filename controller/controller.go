@@ -36,6 +36,25 @@ func GetClusterInfo(clusterID string, userAuthId string, userType string) (model
 	return clusterInfo, err
 }
 
+var newExecutor = func(clientset kubernetes.Interface, cfg *rest.Config, pod, namespace, container string) (remotecommand.Executor, error) {
+	req := clientset.CoreV1().RESTClient().
+		Post().
+		Resource("pods").
+		Name(pod).
+		Namespace(namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: container,
+			Command:   []string{"/bin/sh"},
+			Stdin:     true,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       true,
+		}, scheme.ParameterCodec)
+
+	return remotecommand.NewWebSocketExecutor(cfg, "POST", req.URL().String())
+}
+
 func ExecWebSocketHandler(c *gin.Context) {
 	var pod = c.Query("pod")
 	var namespace = c.Query("namespace")
@@ -44,16 +63,24 @@ func ExecWebSocketHandler(c *gin.Context) {
 
 	val, exists := c.Get("claims")
 	if !exists {
-		log.Fatalf("Claims 조회 실패")
+		// log.Fatalf("Claims 조회 실패")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "claims not found"})
+		return
 	}
-	claims, exists := val.(jwt.MapClaims)
-	if !exists {
-		log.Fatalf("Claims 조회 실패")
-	}
+	//claims, ok := val.(jwt.MapClaims)
+	//if !ok {
+	//	// log.Fatalf("Claims 조회 실패")
+	//	c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid claims format"})
+	//	return
+	//}
+
+	claims := val.(jwt.MapClaims)
 
 	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string))
 	if err != nil {
-		log.Fatalf("클러스터 조회 실패: %v", err)
+		// log.Fatalf("클러스터 조회 실패: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cluster info: " + err.Error()})
+		return
 	}
 	cfg := &rest.Config{
 		Host:        clusterInfo.APIServerURL,
@@ -71,39 +98,21 @@ func ExecWebSocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("Failed to load kubeconfig"))
-		return
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
+	//clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := K8sClientFactoryImpl.NewForConfig(cfg)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Failed to create clientset"))
 		return
 	}
 
-	req := clientset.CoreV1().RESTClient().
-		Post().
-		Resource("pods").
-		Name(pod).
-		Namespace(namespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: container,
-			Command:   []string{"/bin/sh"},
-			Stdin:     true,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       true,
-		}, scheme.ParameterCodec)
-
-	executor, err := remotecommand.NewWebSocketExecutor(cfg, "POST", req.URL().String())
+	executor, err := newExecutor(clientset, cfg, pod, namespace, container)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Executor error:"+err.Error()))
 		return
 	}
 
 	wsStream := newWebSocketStream(conn)
+
 	err = executor.Stream(remotecommand.StreamOptions{
 		Stdin:  wsStream,
 		Stdout: wsStream,
@@ -149,7 +158,7 @@ func CheckShellHandler(c *gin.Context) {
 		},
 	}
 
-	clientset, err := kubernetes.NewForConfig(cfg)
+	clientset, err := K8sClientFactoryImpl.NewForConfig(cfg)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create clientset: " + err.Error()})
 		return
@@ -204,3 +213,15 @@ func CheckShellHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, statuses)
 }
+
+type K8sClientFactory interface {
+	NewForConfig(*rest.Config) (kubernetes.Interface, error)
+}
+
+type realK8sClientFactory struct{}
+
+func (f *realK8sClientFactory) NewForConfig(c *rest.Config) (kubernetes.Interface, error) {
+	return kubernetes.NewForConfig(c)
+}
+
+var K8sClientFactoryImpl K8sClientFactory = &realK8sClientFactory{}
