@@ -134,7 +134,7 @@ func TestGetClusterInfo(t *testing.T) {
 	}
 }
 
-// fakeK8sClientFactory: 성공 경로 테스트용 가짜 clientset 팩토리.
+// fakeK8sClientFactory: 성공 경로 테스트용 가짜 clientset 팩토리
 type fakeK8sClientFactory struct {
 	clientset kubernetes.Interface
 }
@@ -143,14 +143,14 @@ func (f *fakeK8sClientFactory) NewForConfig(c *rest.Config) (kubernetes.Interfac
 	return f.clientset, nil
 }
 
-// fakeFailingK8sClientFactory: 클라이언트 생성 실패 테스트용 팩토리.
+// fakeFailingK8sClientFactory: 클라이언트 생성 실패 테스트용 팩토리
 type fakeFailingK8sClientFactory struct{}
 
 func (f *fakeFailingK8sClientFactory) NewForConfig(c *rest.Config) (kubernetes.Interface, error) {
 	return nil, errors.New("simulated clientset creation failure")
 }
 
-// FakeExecutor: 원격 명령어 실행의 성공/실패 시뮬레이션용.
+// FakeExecutor: 원격 명령어 실행의 성공/실패 시뮬레이션용
 type FakeExecutor struct {
 	shouldSucceed bool
 }
