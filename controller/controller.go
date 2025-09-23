@@ -98,8 +98,12 @@ func ExecWebSocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	//clientset, err := kubernetes.NewForConfig(cfg)
-	clientset, err := K8sClientFactoryImpl.NewForConfig(cfg)
+	if err != nil {
+		conn.WriteMessage(websocket.TextMessage, []byte("Failed to load kubeconfig"))
+		return
+	}
+
+	clientset, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Failed to create clientset"))
 		return
