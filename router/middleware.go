@@ -52,6 +52,12 @@ func AuthMiddleware() gin.HandlerFunc {
 			}
 			return []byte(JwtSecret), nil
 		})
+		//token, err := jwt.NewParser(jwt.WithExpirationRequired).Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		//	if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
+		//		return nil, jwt.ErrTokenSignatureInvalid
+		//	}
+		//	return []byte(JwtSecret), nil
+		//})
 
 		if err != nil || !token.Valid {
 			slog.Error("Invalid JWT", "err", err.Error())
