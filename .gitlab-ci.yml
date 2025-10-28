@@ -1,0 +1,18 @@
+include:
+  - project: '$MANAGED_PROJECT'
+    ref: '$MANAGED_PROJECT_REF'
+    file: '/.gitlab-ci/.build-template.yml'
+  - project: '$MANAGED_PROJECT'
+    ref: '$MANAGED_PROJECT_REF'
+    file: '/.gitlab-ci/.deploy-template.yml'
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: always
+    - when: never
+
+stages:
+  - build
+  - image_build
+  - deploy
