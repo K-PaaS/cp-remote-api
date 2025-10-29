@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var JwtSecret = "dfa4ad2646d6b4864f2dfa5428249d4eb54dc29bf3f29658fd4676d25706f83c9fc4ef626fa60d2c589a79ebec448ba4d591e2fcb04926fab783fcae50e97c06"
+var JwtSecret = os.Getenv("JWT_SECRET")
 
 func CORSMiddleware() gin.HandlerFunc {
 	return cors.New(cors.Config{

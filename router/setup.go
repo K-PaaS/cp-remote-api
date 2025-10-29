@@ -10,12 +10,18 @@ func SetupRouter() *gin.Engine {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 
-	r.GET("/livez", func(c *gin.Context) {
-		c.String(200, "livez")
-	})
-	r.GET("/readyz", func(c *gin.Context) {
-		c.String(200, "readyz")
-	})
+	health := r.Group("/actuator/health")
+	{
+		health.GET("", func(c *gin.Context) {
+			c.String(200, "OK")
+		})
+		health.GET("/liveness", func(c *gin.Context) {
+			c.String(200, "livez")
+		})
+		health.GET("/readiness", func(c *gin.Context) {
+			c.String(200, "readyz")
+		})
+	}
 
 	api := r.Group("/")
 	api.Use(AuthMiddleware())
