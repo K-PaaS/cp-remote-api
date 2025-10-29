@@ -1,6 +1,7 @@
 package router
 
 import (
+	"cp-remote-access-api/config"
 	"cp-remote-access-api/controller"
 
 	"github.com/gin-gonic/gin"
@@ -35,5 +36,5 @@ func SetupRouter() *gin.Engine {
 
 func Init() {
 	r := SetupRouter()
-	r.Run(":8080")
+	r.Run(config.Env.ServerPort)
 }

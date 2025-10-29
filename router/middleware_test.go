@@ -1,6 +1,7 @@
 package router
 
 import (
+	"cp-remote-access-api/config"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,7 +44,7 @@ type CustomClaims struct {
 // 토큰의 유효성, 만료, 서명, 누락 등 다양한 시나리오 확인
 func TestAuthMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	jwtSecret := []byte(JwtSecret)
+	jwtSecret := []byte(config.Env.JwtSecret)
 	wrongSecret := []byte("a-different-secret-key-that-is-very-long-and-secure")
 
 	// 반복적으로 사용되는 claims 미리 정의

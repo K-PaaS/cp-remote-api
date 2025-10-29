@@ -1,11 +1,10 @@
 package vault
 
 import (
+	"cp-remote-access-api/config"
 	"cp-remote-access-api/model"
 	"errors"
 	"fmt"
-	"os"
-
 	"github.com/hashicorp/vault/api"
 )
 
@@ -17,9 +16,9 @@ type Config struct {
 
 func ConfigFromEnv() *Config {
 	return &Config{
-		URL:      os.Getenv("VAULT_URL"),
-		RoleID:   os.Getenv("VAULT_ROLE_ID"),
-		SecretID: os.Getenv("VAULT_SECRET_ID"),
+		URL:      config.Env.VaultUrl,
+		RoleID:   config.Env.VaultRoleId,
+		SecretID: config.Env.VaultSecretId,
 	}
 }
 

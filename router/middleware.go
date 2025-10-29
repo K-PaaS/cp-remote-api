@@ -1,11 +1,11 @@
 package router
 
 import (
+	"cp-remote-access-api/config"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -13,8 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
-
-var JwtSecret = os.Getenv("JWT_SECRET")
 
 func CORSMiddleware() gin.HandlerFunc {
 	return cors.New(cors.Config{
@@ -51,7 +49,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
 				return nil, jwt.ErrTokenSignatureInvalid
 			}
-			return []byte(JwtSecret), nil
+			return []byte(config.Env.JwtSecret), nil
 		})
 		//token, err := jwt.NewParser(jwt.WithExpirationRequired).Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		//	if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
