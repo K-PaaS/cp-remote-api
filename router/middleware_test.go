@@ -12,13 +12,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// generateTestToken: 테스트용 JWT를 생성하는 헬퍼 함수 (HS512 고정)
+// generateTestToken: 테스트용 JWT 생성 헬퍼 (HS512 고정)
 func generateTestToken(secret []byte, claims jwt.Claims) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
 	return token.SignedString(secret)
 }
 
-// withBearerToken: Bearer 토큰을 생성하여 Authorization 헤더에 추가하는 setup 함수 반환
+// withBearerToken: Authorization 헤더에 Bearer 토큰 주입
 func withBearerToken(claims jwt.Claims, secret []byte) func(req *http.Request) {
 	return func(req *http.Request) {
 		token, _ := generateTestToken(secret, claims)
@@ -26,7 +26,7 @@ func withBearerToken(claims jwt.Claims, secret []byte) func(req *http.Request) {
 	}
 }
 
-// withWebSocketToken: 토큰을 생성하여 Sec-WebSocket-Protocol 헤더에 추가하는 setup 함수 반환
+// withWebSocketToken: Sec-WebSocket-Protocol 헤더에 토큰 주입
 func withWebSocketToken(claims jwt.Claims, secret []byte) func(req *http.Request) {
 	return func(req *http.Request) {
 		token, _ := generateTestToken(secret, claims)
@@ -34,20 +34,24 @@ func withWebSocketToken(claims jwt.Claims, secret []byte) func(req *http.Request
 	}
 }
 
-// CustomClaims: 'Invalid Claims Type' 테스트를 위한 커스텀 클레임 구조체
+// CustomClaims: 'Invalid Claims Type' 테스트용 커스텀 구조체
 type CustomClaims struct {
 	Foo string `json:"foo"`
 	jwt.RegisteredClaims
 }
 
-// AuthMiddleware의 JWT 인증 로직 검증
-// 토큰의 유효성, 만료, 서명, 누락 등 다양한 시나리오 확인
+// TestAuthMiddleware: JWT 인증 미들웨어 로직 검증
 func TestAuthMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	// Arrange: 테스트용 config.Env 설정 (nil 패닉 방지)
+	config.Env = &config.EnvConfigs{
+		JwtSecret: "a-very-secure-test-secret-key-for-hs512-algo",
+	}
 	jwtSecret := []byte(config.Env.JwtSecret)
 	wrongSecret := []byte("a-different-secret-key-that-is-very-long-and-secure")
 
-	// 반복적으로 사용되는 claims 미리 정의
+	// Arrange: 테스트용 클레임 정의
 	validClaims := jwt.MapClaims{
 		"userAuthId": "test-user",
 		"exp":        float64(time.Now().Add(time.Hour).Unix()),
@@ -59,6 +63,9 @@ func TestAuthMiddleware(t *testing.T) {
 	missingUserClaim := jwt.MapClaims{
 		"exp": float64(time.Now().Add(time.Hour).Unix()),
 	}
+	missingExpClaim := jwt.MapClaims{
+		"userAuthId": "test-user",
+	}
 
 	testCases := []struct {
 		name               string
@@ -67,51 +74,49 @@ func TestAuthMiddleware(t *testing.T) {
 		expectedBody       string
 	}{
 		{
-			// 성공: 정상적인 Bearer 토큰
 			name:               "Success - Valid Bearer Token",
 			setupRequest:       withBearerToken(validClaims, jwtSecret),
 			expectedStatusCode: http.StatusOK,
 			expectedBody:       `{"message":"passed"}`,
 		},
 		{
-			// 성공: 웹소켓 프로토콜을 통한 정상 토큰
 			name:               "Success - Valid WebSocket Protocol Token",
 			setupRequest:       withWebSocketToken(validClaims, jwtSecret),
 			expectedStatusCode: http.StatusOK,
 			expectedBody:       `{"message":"passed"}`,
 		},
 		{
-			// 실패: 토큰이 없는 경우
 			name:               "Failure - No Token Provided",
 			setupRequest:       func(req *http.Request) {},
 			expectedStatusCode: http.StatusUnauthorized,
 			expectedBody:       `"MISSING_JWT"`,
 		},
 		{
-			// 실패: 만료된 토큰
 			name:               "Failure - Expired Token",
 			setupRequest:       withBearerToken(expiredClaims, jwtSecret),
 			expectedStatusCode: http.StatusUnauthorized,
 			expectedBody:       `"TOKEN_EXPIRED"`,
 		},
 		{
-			// 실패: 잘못된 키로 서명된 토큰
 			name:               "Failure - Token Signed with Wrong Secret",
 			setupRequest:       withBearerToken(validClaims, wrongSecret),
 			expectedStatusCode: http.StatusUnauthorized,
 			expectedBody:       `"TOKEN_FAILED"`,
 		},
 		{
-			// 실패: 필수 클레임(userAuthId)이 누락된 토큰
 			name:               "Failure - Missing userAuthId claim",
 			setupRequest:       withBearerToken(missingUserClaim, jwtSecret),
 			expectedStatusCode: http.StatusUnauthorized,
 			expectedBody:       `"ApiAccessDenied"`,
 		},
 		{
-			// 실패: 토큰 서명 알고리즘이 다른 경우 (HS512가 아님)
+			name:               "Failure - Missing exp claim",
+			setupRequest:       withBearerToken(missingExpClaim, jwtSecret),
+			expectedStatusCode: http.StatusUnauthorized,
+			expectedBody:       `"TOKEN_FAILED"`,
+		},
+		{
 			name: "Failure - Token with Wrong Signing Method",
-			// 이 케이스는 generateTestToken 헬퍼를 사용할 수 없으므로 기존 로직 유지
 			setupRequest: func(req *http.Request) {
 				claims := jwt.MapClaims{"userAuthId": "test-user"}
 				token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -122,7 +127,6 @@ func TestAuthMiddleware(t *testing.T) {
 			expectedBody:       `"TOKEN_FAILED"`,
 		},
 		{
-			// 실패: 토큰의 Claims 구조체가 예상과 다른 경우
 			name: "Failure - Invalid Claims Type",
 			setupRequest: func(req *http.Request) {
 				claims := CustomClaims{
@@ -139,6 +143,7 @@ func TestAuthMiddleware(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: 라우터 및 더미 핸들러 설정
 			r := gin.New()
 			r.Use(AuthMiddleware())
 			r.GET("/test", func(c *gin.Context) {
@@ -148,10 +153,13 @@ func TestAuthMiddleware(t *testing.T) {
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest(http.MethodGet, "/test", nil)
 
+			// Arrange: 테스트 케이스별 헤더 설정
 			tc.setupRequest(req)
 
+			// Act: 요청 수행
 			r.ServeHTTP(w, req)
 
+			// Assert: 상태 코드 및 바디 검증
 			assert.Equal(t, tc.expectedStatusCode, w.Code)
 			assert.Contains(t, w.Body.String(), tc.expectedBody)
 		})

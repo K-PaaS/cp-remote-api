@@ -1,18 +1,19 @@
 package config
 
 import (
-	"github.com/spf13/viper"
 	"log"
 	"os"
+
+	"github.com/spf13/viper"
 )
 
-var Env *envConfigs
+var Env *EnvConfigs
 
 func InitEnvConfigs() {
 	Env = loadEnvVariables()
 }
 
-type envConfigs struct {
+type EnvConfigs struct {
 	ServerPort    string `mapstructure:"SERVER_PORT"`
 	JwtSecret     string `mapstructure:"JWT_SECRET"`
 	VaultUrl      string `mapstructure:"VAULT_URL"`
@@ -20,7 +21,7 @@ type envConfigs struct {
 	VaultSecretId string `mapstructure:"VAULT_SECRET_ID"`
 }
 
-func loadEnvVariables() (config *envConfigs) {
+func loadEnvVariables() (config *EnvConfigs) {
 	wd, _ := os.Getwd()
 	log.Print("working dir:", wd)
 	viper.AddConfigPath(".")

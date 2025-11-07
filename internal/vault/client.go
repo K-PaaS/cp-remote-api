@@ -5,6 +5,8 @@ import (
 	"cp-remote-access-api/model"
 	"errors"
 	"fmt"
+	"log"
+
 	"github.com/hashicorp/vault/api"
 )
 
@@ -81,13 +83,18 @@ func (c *Client) GetClusterAPI(clusterID string) (string, error) {
 	return data["clusterApiUrl"].(string), nil
 }
 
-func (c *Client) GetClusterToken(clusterID string, userGuid string, userType string) (string, error) {
+func (c *Client) GetClusterToken(clusterID string, userGuid string, userType string, namespace string) (string, error) {
 	var path string
+
 	if userType == "SUPER_ADMIN" {
 		path = fmt.Sprintf("secret/data/cluster/%s", clusterID)
-	} else {
+	} else if userType == "CLUSTER_ADMIN" {
 		path = fmt.Sprintf("secret/data/user/%s/%s", userGuid, clusterID)
+	} else {
+		path = fmt.Sprintf("secret/data/user/%s/%s/%s", userGuid, clusterID, namespace)
 	}
+
+	log.Printf("UESR_TYPE: %s, PATH: %s", userType, path)
 
 	secret, err := c.api.Logical().Read(path)
 	if err != nil {

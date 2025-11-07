@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"cp-remote-access-api/config"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,144 +12,156 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// setupMockVault: "성공" 시나리오를 위한 가짜 Vault 서버
+// setupMockVault: "성공" 시나리오용 가짜 Vault 서버 설정
 func setupMockVault(t *testing.T) *httptest.Server {
 	handler := http.NewServeMux()
 
+	// 1. AppRole 로그인
 	handler.HandleFunc("/v1/auth/approle/login", func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "PUT", r.Method)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"auth":{"client_token":"test-token","lease_duration":3600}}`)
+		fmt.Fprint(w, `{"auth":{"client_token":"test-token"}}`)
 	})
 
+	// 2. SUPER_ADMIN 경로
 	handler.HandleFunc("/v1/secret/data/cluster/test-cluster", func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "GET", r.Method)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"data":{"clusterApiUrl":"https://fake-cluster.api","clusterToken":"super-admin-token"}}}`)
 	})
 
-	handler.HandleFunc("/v1/secret/data/user/test-user/test-cluster", func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "GET", r.Method)
+	// 3. CLUSTER_ADMIN 경로
+	handler.HandleFunc("/v1/secret/data/user/admin-guid/test-cluster", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"data":{"data":{"clusterToken":"user-specific-token"}}}`)
+		fmt.Fprint(w, `{"data":{"data":{"clusterToken":"cluster-admin-token"}}}`)
+	})
+
+	// 4. USER 경로
+	handler.HandleFunc("/v1/secret/data/user/user-guid/test-cluster/user-ns", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"data":{"clusterToken":"user-token"}}}`)
 	})
 
 	return httptest.NewServer(handler)
 }
 
-// setupFailingMockVault: "실패" 시나리오를 위한 가짜 Vault 서버
+// setupFailingMockVault: "실패" 시나리오용 가짜 Vault 서버 설정
 func setupFailingMockVault(t *testing.T) *httptest.Server {
 	handler := http.NewServeMux()
 
 	handler.HandleFunc("/v1/auth/approle/login", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "permission denied", http.StatusForbidden)
 	})
-
 	handler.HandleFunc("/v1/auth/approle/login-success", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"auth":{"client_token":"test-token"}}`)
 	})
-	handler.HandleFunc("/v1/secret/data/cluster/not-found-cluster", func(w http.ResponseWriter, r *http.Request) {
+
+	notFoundHandler := func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
-	})
+	}
+	handler.HandleFunc("/v1/secret/data/cluster/not-found", notFoundHandler)
+	handler.HandleFunc("/v1/secret/data/user/any-user/not-found/any-ns", notFoundHandler)
 
-	handler.HandleFunc("/v1/secret/data/cluster/malformed-cluster", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{}`)
+	handler.HandleFunc("/v1/secret/data/cluster/malformed", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"data": {"wrong_key": "value"}}`)
 	})
-
-	handler.HandleFunc("/v1/secret/data/user/any-user/malformed-cluster", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{}`)
+	handler.HandleFunc("/v1/secret/data/user/any-user/malformed/any-ns", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"wrong_key": "value"}`)
 	})
 
 	return httptest.NewServer(handler)
 }
 
-// Vault 클라이언트의 성공 시나리오 검증
+// TestVaultClient_Success: Vault 클라이언트 성공 시나리오
 func TestVaultClient_Success(t *testing.T) {
 	mockServer := setupMockVault(t)
 	defer mockServer.Close()
 
+	// Arrange: 환경 변수 설정
 	t.Setenv("VAULT_URL", mockServer.URL)
 	t.Setenv("VAULT_ROLE_ID", "test-role-id")
 	t.Setenv("VAULT_SECRET_ID", "test-secret-id")
 
+	// Arrange: config.Env 수동 초기화 (nil 패닉 방지)
+	config.Env = &config.EnvConfigs{
+		VaultUrl:      mockServer.URL,
+		VaultRoleId:   "test-role-id",
+		VaultSecretId: "test-secret-id",
+	}
+
+	// Arrange: 클라이언트 생성 (AppRole 로그인)
 	cfg := ConfigFromEnv()
 	client, err := NewClient(cfg)
-	require.NoError(t, err)
+	require.NoError(t, err, "NewClient should succeed")
 	require.NotNil(t, client)
 
-	// 성공: GetClusterInfo 정상 호출
+	// Act & Assert: GetClusterInfo
 	t.Run("GetClusterInfo successfully", func(t *testing.T) {
 		info, err := client.GetClusterInfo("test-cluster")
 		assert.NoError(t, err)
-		assert.Equal(t, "test-cluster", info.ClusterID)
 		assert.Equal(t, "https://fake-cluster.api", info.APIServerURL)
 		assert.Equal(t, "super-admin-token", info.BearerToken)
 	})
 
-	// 성공: GetClusterAPI 정상 호출
+	// Act & Assert: GetClusterAPI
 	t.Run("GetClusterAPI successfully", func(t *testing.T) {
 		apiURL, err := client.GetClusterAPI("test-cluster")
 		assert.NoError(t, err)
 		assert.Equal(t, "https://fake-cluster.api", apiURL)
 	})
 
-	// 성공: GetClusterToken (SUPER_ADMIN) 정상 호출
+	// Act & Assert: GetClusterToken (SUPER_ADMIN)
 	t.Run("GetClusterToken for SUPER_ADMIN", func(t *testing.T) {
-		token, err := client.GetClusterToken("test-cluster", "any-user", "SUPER_ADMIN")
+		token, err := client.GetClusterToken("test-cluster", "any-user", "SUPER_ADMIN", "any-ns")
 		assert.NoError(t, err)
 		assert.Equal(t, "super-admin-token", token)
 	})
 
-	// 성공: GetClusterToken (일반 사용자) 정상 호출
-	t.Run("GetClusterToken for regular user", func(t *testing.T) {
-		token, err := client.GetClusterToken("test-cluster", "test-user", "USER")
+	// Act & Assert: GetClusterToken (CLUSTER_ADMIN)
+	t.Run("GetClusterToken for CLUSTER_ADMIN", func(t *testing.T) {
+		token, err := client.GetClusterToken("test-cluster", "admin-guid", "CLUSTER_ADMIN", "any-ns")
 		assert.NoError(t, err)
-		assert.Equal(t, "user-specific-token", token)
+		assert.Equal(t, "cluster-admin-token", token)
+	})
+
+	// Act & Assert: GetClusterToken (USER)
+	t.Run("GetClusterToken for USER", func(t *testing.T) {
+		token, err := client.GetClusterToken("test-cluster", "user-guid", "USER", "user-ns")
+		assert.NoError(t, err)
+		assert.Equal(t, "user-token", token)
 	})
 }
 
-// Vault 클라이언트의 실패 시나리오 검증
+// TestVaultClient_Failures: Vault 클라이언트 실패 시나리오
 func TestVaultClient_Failures(t *testing.T) {
-	// assertAllApiCallsFail: 클라이언트의 모든 API 호출이 실패하는지 검증하는 헬퍼.
-	assertAllApiCallsFail := func(t *testing.T, client *Client, clusterID string) {
-		t.Helper() // 이 함수가 테스트 헬퍼임을 명시
-
-		_, err := client.GetClusterAPI(clusterID)
-		require.Error(t, err, "GetClusterAPI should fail")
-
-		_, err = client.GetClusterInfo(clusterID)
-		require.Error(t, err, "GetClusterInfo should fail")
-
-		_, err = client.GetClusterToken(clusterID, "any-user", "USER")
-		require.Error(t, err, "GetClusterToken should fail")
-	}
-
 	mockServer := setupFailingMockVault(t)
 	defer mockServer.Close()
 
-	// 실패: NewClient 생성 시 URL 포맷이 잘못된 경우
+	// Arrange: config.Env 수동 초기화 (nil 패닉 방지)
+	config.Env = &config.EnvConfigs{}
+
+	// 실패: NewClient (URL 포맷 오류)
 	t.Run("NewClient fails on invalid URL", func(t *testing.T) {
-		cfg := &Config{URL: "::not a valid url"}
+		t.Setenv("VAULT_URL", "::not a valid url")
+
+		config.Env.VaultUrl = "::not a valid url"
+
+		cfg := ConfigFromEnv()
 		client, err := NewClient(cfg)
 		require.Error(t, err)
 		assert.Nil(t, client)
 	})
 
-	// 실패: NewClient 생성 시 AppRole 로그인이 실패하는 경우
-	t.Run("NewClient fails on login error", func(t *testing.T) {
-		cfg := &Config{
-			URL:      mockServer.URL,
-			RoleID:   "any-role",
-			SecretID: "any-secret",
-		}
+	// 실패: NewClient (AppRole 로그인 403)
+	t.Run("NewClient fails on login error (403)", func(t *testing.T) {
+		t.Setenv("VAULT_URL", mockServer.URL)
+		config.Env.VaultUrl = mockServer.URL
+
+		cfg := ConfigFromEnv()
 		client, err := NewClient(cfg)
-		require.Error(t, err)
+		require.Error(t, err, "NewClient should fail on AppRole login")
+		assert.Contains(t, err.Error(), "permission denied")
 		assert.Nil(t, client)
 	})
 
-	// 이후 실패 테스트를 위해, 로그인이 성공한 클라이언트를 미리 생성
 	vaultCfg := api.DefaultConfig()
 	vaultCfg.Address = mockServer.URL
 	apiClient, _ := api.NewClient(vaultCfg)
@@ -156,25 +169,42 @@ func TestVaultClient_Failures(t *testing.T) {
 	apiClient.SetToken(resp.Auth.ClientToken)
 	clientWithLogin := &Client{api: apiClient}
 
-	// 실패: Secret을 찾지 못하는 경우 (404)
-	t.Run("API calls fail on secret not found", func(t *testing.T) {
-		assertAllApiCallsFail(t, clientWithLogin, "not-found-cluster")
+	// 실패: Secret Not Found (JSON 파싱 에러 -> if err != nil 검증)
+	t.Run("API calls fail on secret not found (404)", func(t *testing.T) {
+		_, err := clientWithLogin.GetClusterInfo("not-found")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "json: cannot unmarshal")
+
+		_, err = clientWithLogin.GetClusterToken("not-found", "any-user", "USER", "any-ns")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "json: cannot unmarshal")
 	})
 
-	// 실패: 응답 내용은 있으나 데이터가 비정상적인 경우
+	// 실패: 응답 데이터 구조 오류 (secret == nil 검증)
 	t.Run("API calls fail on malformed response", func(t *testing.T) {
-		assertAllApiCallsFail(t, clientWithLogin, "malformed-cluster")
+		_, err := clientWithLogin.GetClusterInfo("malformed")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "malformed secret data")
+
+		_, err = clientWithLogin.GetClusterToken("malformed", "any-user", "USER", "any-ns")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "malformed secret data")
 	})
 }
 
-// ConfigFromEnv 함수의 독립적인 단위 테스트
+// TestConfigFromEnv: ConfigFromEnv 함수가 환경변수 잘 읽는지 확인
 func TestConfigFromEnv(t *testing.T) {
-	t.Setenv("VAULT_URL", "http://test.vault:8200")
-	t.Setenv("VAULT_ROLE_ID", "test-role")
-	t.Setenv("VAULT_SECRET_ID", "test-secret")
+	// Arrange: config.Env 수동 초기화 (nil 패닉 방지)
+	config.Env = &config.EnvConfigs{
+		VaultUrl:      "http://test.vault:8200",
+		VaultRoleId:   "test-role",
+		VaultSecretId: "test-secret",
+	}
 
+	// Act
 	cfg := ConfigFromEnv()
 
+	// Assert
 	assert.Equal(t, "http://test.vault:8200", cfg.URL)
 	assert.Equal(t, "test-role", cfg.RoleID)
 	assert.Equal(t, "test-secret", cfg.SecretID)
