@@ -19,21 +19,28 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-func GetClusterInfo(clusterID string, userAuthId string, userType string) (model.ClusterCredential, error) {
+func GetClusterInfo(clusterID string, userAuthId string, userType string, namespace string) (model.ClusterCredential, error) {
 	vaultCfg := vault.ConfigFromEnv()
 	vaultClient, err := vault.NewClient(vaultCfg)
 	if err != nil {
-		log.Fatalf("Vault 클라이언트 생성 실패: %v", err)
+		log.Printf("Vault 클라이언트 생성 실패: %v", err)
+		return model.ClusterCredential{}, err
 	}
-	//clusterInfo, err := vaultClient.GetClusterInfo(clusterID)
 
 	clusterAPI, err := vaultClient.GetClusterAPI(clusterID)
-	clusterToken, err := vaultClient.GetClusterToken(clusterID, userAuthId, userType)
-	var clusterInfo = model.ClusterCredential{ClusterID: clusterID, APIServerURL: clusterAPI, BearerToken: clusterToken}
 	if err != nil {
-		log.Fatalf("클러스터 정보 조회 실패: %v", err)
+		log.Printf("Vault GetClusterAPI 실패: %v", err)
+		return model.ClusterCredential{}, err
 	}
-	return clusterInfo, err
+
+	clusterToken, err := vaultClient.GetClusterToken(clusterID, userAuthId, userType, namespace)
+	if err != nil {
+		log.Printf("Vault GetClusterToken 실패: %v", err)
+		return model.ClusterCredential{}, err
+	}
+
+	var clusterInfo = model.ClusterCredential{ClusterID: clusterID, APIServerURL: clusterAPI, BearerToken: clusterToken}
+	return clusterInfo, nil
 }
 
 var newExecutor = func(clientset kubernetes.Interface, cfg *rest.Config, pod, namespace, container string) (remotecommand.Executor, error) {
@@ -63,22 +70,14 @@ func ExecWebSocketHandler(c *gin.Context) {
 
 	val, exists := c.Get("claims")
 	if !exists {
-		// log.Fatalf("Claims 조회 실패")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "claims not found"})
 		return
 	}
-	//claims, ok := val.(jwt.MapClaims)
-	//if !ok {
-	//	// log.Fatalf("Claims 조회 실패")
-	//	c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid claims format"})
-	//	return
-	//}
 
 	claims := val.(jwt.MapClaims)
 
-	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string))
+	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string), namespace)
 	if err != nil {
-		// log.Fatalf("클러스터 조회 실패: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get cluster info: " + err.Error()})
 		return
 	}
@@ -98,7 +97,6 @@ func ExecWebSocketHandler(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	//clientset, err := kubernetes.NewForConfig(cfg)
 	clientset, err := K8sClientFactoryImpl.NewForConfig(cfg)
 	if err != nil {
 		conn.WriteMessage(websocket.TextMessage, []byte("Failed to create clientset"))
@@ -145,7 +143,7 @@ func CheckShellHandler(c *gin.Context) {
 		return
 	}
 
-	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string))
+	clusterInfo, err := GetClusterInfo(clusterId, claims["userAuthId"].(string), claims["userType"].(string), namespace)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get cluster info: " + err.Error()})
 		return

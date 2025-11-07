@@ -51,12 +51,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			}
 			return []byte(config.Env.JwtSecret), nil
 		})
-		//token, err := jwt.NewParser(jwt.WithExpirationRequired).Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		//	if token.Method.Alg() != jwt.SigningMethodHS512.Alg() {
-		//		return nil, jwt.ErrTokenSignatureInvalid
-		//	}
-		//	return []byte(JwtSecret), nil
-		//})
 
 		if err != nil || !token.Valid {
 			slog.Error("Invalid JWT", "err", err.Error())
@@ -89,24 +83,11 @@ func AuthMiddleware() gin.HandlerFunc {
 
 		userId, ok := claims["userAuthId"].(string)
 		if !ok {
-			slog.Error("Missing userId claim") // ApiAccessDenied
+			slog.Error("Missing userId claim")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, "ApiAccessDenied")
 			return
 		}
 		fmt.Print(userId)
-		/*
-			isAdmin, err := i.IsAdminCheck(userId)
-			if err != nil {
-				slog.Info("Failed to admin check api call", "err", err)
-				response.ServerError(c)
-				return
-			}
-
-			if !isAdmin {
-				slog.Info("Not authorized to access this api")
-				response.Unauthorized(c, errmsg.ApiAccessDenied)
-				return
-			}*/
 
 		c.Set("claims", claims)
 		c.Next()
