@@ -20,4 +20,6 @@ RUN addgroup -S 1000 && adduser -S 1000 -G 1000
 RUN mkdir -p /home/1000
 RUN chown -R 1000:1000 /home/1000
 
+RUN apk update && apk add --force-broken-world --no-cache busybox=1.37.0-r14 busybox-binsh=1.37.0-r14 ssl_client=1.37.0-r14
+
 CMD ["./server"]
